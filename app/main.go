@@ -18,24 +18,34 @@ func main() {
 		fmt.Println("Failed to bind to port 6379")
 		os.Exit(1)
 	}
-	conn, err := l.Accept()
-	if err != nil {
-		fmt.Println("Error accepting connection: ", err.Error())
-		os.Exit(1)
+	id := 0
+	for true {
+		conn, err := l.Accept()
+		if err != nil {
+			fmt.Println("Error accepting connection: ", err.Error())
+			os.Exit(1)
+		}
+		id += 1
+		go handleConnection(conn, id)
 	}
+}
 
-	fmt.Println("Accepted connection on port 6379")
+func handleConnection(conn net.Conn, id int) {
 	defer conn.Close()
-
+	fmt.Printf("[%d] Accepted connection for client\n", id)
 	for true {
 		line, err := readLine(conn)
 		if err != nil {
+			if err.Error() == "EOF" {
+				fmt.Printf("[%d] EOF\n", id)
+				return
+			}
 			fmt.Println("Error reading from connection:", err.Error())
 			os.Exit(1)
 		}
 		line = strings.TrimSpace(line)
 
-		fmt.Printf("Received: '%s'\n", line)
+		fmt.Printf("[%d] Received: '%s'\n", id, line)
 		if line == "PING" {
 			conn.Write([]byte("+PONG\r\n"))
 		}
