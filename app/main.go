@@ -16,15 +16,24 @@ var _ = os.Exit
 type Connection struct {
 	id       int
 	conn     net.Conn
+	reader   io.Reader
+	writer   io.Writer
 	command  string
 	response string
 	raw      string
 	args     []string
 	commands map[string]func(*Connection) error
+	KV       map[string]string
+}
+
+var globalCommands = map[string]func(*Connection) error{
+	"ping": ping,
+	"echo": echo,
+	"set":  set,
+	"get":  get,
 }
 
 func main() {
-
 	l, err := net.Listen("tcp", "0.0.0.0:6379")
 	if err != nil {
 		fmt.Println("Failed to bind to port 6379")
@@ -40,15 +49,18 @@ func main() {
 		id += 1
 
 		connection := Connection{
-			id:   id,
-			conn: conn,
-			commands: map[string]func(*Connection) error{
-				"ping": ping,
-				"echo": echo,
-			},
+			id:       id,
+			conn:     conn,
+			reader:   conn,
+			writer:   conn,
+			commands: globalCommands,
+			KV:       map[string]string{},
 		}
 
-		go handleConnection(&connection)
+		go func(conn *Connection) {
+			defer connection.conn.Close()
+			handleConnection(conn)
+		}(&connection)
 	}
 }
 
@@ -57,20 +69,37 @@ func ping(c *Connection) error {
 	return nil
 }
 
+func set(c *Connection) error {
+	if len(c.args) != 2 {
+		return fmt.Errorf("-ERR wrong number of arguments for 'set' command: %s\r\n", c.raw)
+	}
+	c.KV[c.args[0]] = c.args[1]
+	c.response = "+OK\r\n"
+	return nil
+}
+
+func get(c *Connection) error {
+	if len(c.args) != 1 {
+		return fmt.Errorf("-ERR wrong number of arguments for 'get' command: %s\r\n", c.raw)
+	}
+	value := c.KV[c.args[0]]
+	c.response = fmt.Sprintf("$%v\r\n%v\r\n", len(value), value)
+	return nil
+}
+
 func echo(c *Connection) error {
 	c.response = fmt.Sprintf("+%s\r\n", strings.Join(c.args, " "))
 	return nil
 }
 
-func handleConnection(connection *Connection) {
-	defer connection.conn.Close()
+func handleConnection(connection *Connection) error {
 	fmt.Printf("[%d] Accepted connection for client\n", connection.id)
 	for true {
-		parts, err := readRedisCmd(connection.conn)
+		parts, err := readRedisCmd(connection.reader)
 		if err != nil {
 			if err.Error() == "EOF" {
 				fmt.Printf("[%d] EOF\n", connection.id)
-				return
+				return nil
 			}
 			fmt.Println("Error reading from connection:", err.Error())
 			os.Exit(1)
@@ -84,14 +113,15 @@ func handleConnection(connection *Connection) {
 			err := command(connection)
 			if err != nil {
 				fmt.Printf("[%d] Error executing command: %s\n", connection.id, err.Error())
-				os.Exit(1)
+				connection.response = "-ERR " + err.Error()
 			}
 		} else {
 			fmt.Printf("[%d] Unknown command '%s'\n", connection.id, connection.raw)
 			connection.response = "-ERR unknown command '" + connection.command + "'\r\n"
 		}
-		connection.conn.Write([]byte(connection.response))
+		connection.writer.Write([]byte(connection.response))
 	}
+	return nil
 }
 
 func readLine(conn io.Reader) (string, error) {
