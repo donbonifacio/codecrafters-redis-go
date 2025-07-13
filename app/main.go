@@ -67,10 +67,6 @@ func handleConnection(connection *Connection) {
 	fmt.Printf("[%d] Accepted connection for client\n", connection.id)
 	for true {
 		parts, err := readRedisCmd(connection.conn)
-		if len(parts) == 0 {
-			break
-		}
-		line := parts[0]
 		if err != nil {
 			if err.Error() == "EOF" {
 				fmt.Printf("[%d] EOF\n", connection.id)
@@ -83,7 +79,7 @@ func handleConnection(connection *Connection) {
 		connection.command = strings.ToLower(parts[0])
 		connection.args = parts[1:]
 
-		fmt.Printf("[%d] Received: '%s'\n", connection.id, line)
+		fmt.Printf("[%d] Received: '%s'\n", connection.id, connection.raw)
 		if command, ok := connection.commands[connection.command]; ok {
 			err := command(connection)
 			if err != nil {
