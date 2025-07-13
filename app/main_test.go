@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"testing"
+	"time"
 )
 
 func processCommand(t *testing.T, previous *Connection, cmd string, expectedResponse string) *Connection {
@@ -10,7 +11,7 @@ func processCommand(t *testing.T, previous *Connection, cmd string, expectedResp
 		reader:   bytes.NewBufferString(cmd),
 		writer:   bytes.NewBufferString(""),
 		commands: globalCommands,
-		KV:       map[string]string{},
+		KV:       map[string]RedisValue{},
 	}
 
 	if previous != nil {
@@ -29,12 +30,28 @@ func processCommand(t *testing.T, previous *Connection, cmd string, expectedResp
 
 func TestSetGet(t *testing.T) {
 	connection := processCommand(t, nil,
-		"*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n",
-		"+OK\r\n",
+		resp("SET", "key", "value"),
+		resp_ok(),
 	)
 	processCommand(t, connection,
-		"*2\r\n$3\r\nGET\r\n$3\r\nkey\r\n",
-		"$5\r\nvalue\r\n",
+		resp("GET", "key"),
+		resp("value"),
+	)
+}
+
+func TestSetGetExpiry(t *testing.T) {
+	connection := processCommand(t, nil,
+		resp("SET", "key", "value", "px", "1000"),
+		resp_ok(),
+	)
+	connection = processCommand(t, connection,
+		resp("GET", "key"),
+		resp("value"),
+	)
+	time.Sleep(2 * time.Second)
+	connection = processCommand(t, connection,
+		resp("GET", "key"),
+		resp_nil(),
 	)
 }
 

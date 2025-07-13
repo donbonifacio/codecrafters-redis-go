@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Ensures gofmt doesn't remove the "net" and "os" imports in stage 1 (feel free to remove this!)
@@ -23,7 +24,13 @@ type Connection struct {
 	raw      string
 	args     []string
 	commands map[string]func(*Connection) error
-	KV       map[string]string
+	KV       map[string]RedisValue
+}
+
+type RedisValue struct {
+	Value     string
+	Type      string
+	ExpiresAt *time.Time
 }
 
 var globalCommands = map[string]func(*Connection) error{
@@ -54,7 +61,7 @@ func main() {
 			reader:   conn,
 			writer:   conn,
 			commands: globalCommands,
-			KV:       map[string]string{},
+			KV:       map[string]RedisValue{},
 		}
 
 		go func(conn *Connection) {
@@ -64,17 +71,58 @@ func main() {
 	}
 }
 
+func resp(parts ...string) string {
+	var sb strings.Builder
+	if len(parts) == 0 {
+		sb.WriteString(resp_nil())
+		return sb.String()
+	}
+	if len(parts) > 1 {
+		sb.WriteString(fmt.Sprintf("*%d\r\n", len(parts)))
+	}
+	for _, part := range parts {
+		sb.WriteString(fmt.Sprintf("$%d\r\n%s\r\n", len(part), part))
+	}
+	return sb.String()
+}
+
+func resp_ok() string {
+	return "+OK\r\n"
+}
+
+func resp_nil() string {
+	return "$-1\r\n"
+}
+
+func resp_error(err error) string {
+	return fmt.Sprintf("-ERR %s\r\n", err.Error())
+}
+
 func ping(c *Connection) error {
 	c.response = "+PONG\r\n"
 	return nil
 }
 
 func set(c *Connection) error {
-	if len(c.args) != 2 {
+	if len(c.args) < 2 {
 		return fmt.Errorf("-ERR wrong number of arguments for 'set' command: %s\r\n", c.raw)
 	}
-	c.KV[c.args[0]] = c.args[1]
-	c.response = "+OK\r\n"
+	value := RedisValue{
+		Value:     c.args[1],
+		Type:      "string",
+		ExpiresAt: nil,
+	}
+	if len(c.args) == 4 {
+		duration, err := strconv.Atoi(c.args[3])
+		if err != nil {
+			return fmt.Errorf("-ERR invalid duration: %s\r\n", err.Error())
+		}
+		expires_at := time.Now().UTC().Add(time.Duration(duration) * time.Millisecond)
+		value.ExpiresAt = &expires_at
+
+	}
+	c.KV[c.args[0]] = value
+	c.response = resp_ok()
 	return nil
 }
 
@@ -83,7 +131,16 @@ func get(c *Connection) error {
 		return fmt.Errorf("-ERR wrong number of arguments for 'get' command: %s\r\n", c.raw)
 	}
 	value := c.KV[c.args[0]]
-	c.response = fmt.Sprintf("$%v\r\n%v\r\n", len(value), value)
+
+	now := time.Now().UTC()
+	if value.ExpiresAt != nil && now.After(*value.ExpiresAt) {
+		//fmt.Printf("----now: %v expires: %v\n", now, *value.ExpiresAt)
+		delete(c.KV, c.args[0])
+		c.response = resp_nil()
+		return nil
+	}
+
+	c.response = fmt.Sprintf("$%v\r\n%v\r\n", len(value.Value), value.Value)
 	return nil
 }
 
