@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 	"time"
 )
@@ -16,6 +17,7 @@ func processCommand(t *testing.T, previous *Connection, cmd string, expectedResp
 
 	if previous != nil {
 		connection.KV = previous.KV
+		connection.Config = previous.Config
 	}
 
 	err := handleConnection(connection)
@@ -36,6 +38,22 @@ func TestSetGet(t *testing.T) {
 	processCommand(t, connection,
 		resp("GET", "key"),
 		resp("value"),
+	)
+}
+
+func TestConfig(t *testing.T) {
+	connection := processCommand(t, nil,
+		resp("SET", "key", "value"),
+		resp_ok(),
+	)
+	connection.Config = buildConfig(strings.Split("--dir /tmp/redis-files --dbfilename dump.rdb", " "))
+	processCommand(t, connection,
+		resp("CONFIG", "GET", "dir"),
+		resp("dir", "/tmp/redis-files"),
+	)
+	processCommand(t, connection,
+		resp("CONFIG", "GET", "dbfilename"),
+		resp("dbfilename", "dump.rdb"),
 	)
 }
 
@@ -73,5 +91,16 @@ func TestReadRedisCmd(t *testing.T) {
 		if cmd[i] != expected[i] {
 			t.Errorf("expected cmd[%d] = %q, got %q", i, expected[i], cmd[i])
 		}
+	}
+}
+
+func TestDbArgs(t *testing.T) {
+	cmdline := "./your_program.sh --dir /tmp/redis-files --dbfilename dump.rdb"
+	config := buildConfig(strings.Split(cmdline, " "))
+	if config["dir"] != "/tmp/redis-files" {
+		t.Errorf("expected config[dir] = %q, got %q", "/tmp/redis-files", config["dir"])
+	}
+	if config["dbfilename"] != "dump.rdb" {
+		t.Errorf("expected config[dbfilename] = %q, got %q", "dump.rdb", config["dbfilename"])
 	}
 }

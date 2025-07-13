@@ -25,6 +25,7 @@ type Connection struct {
 	args     []string
 	commands map[string]func(*Connection) error
 	KV       map[string]RedisValue
+	Config   map[string]string
 }
 
 type RedisValue struct {
@@ -34,10 +35,11 @@ type RedisValue struct {
 }
 
 var globalCommands = map[string]func(*Connection) error{
-	"ping": ping,
-	"echo": echo,
-	"set":  set,
-	"get":  get,
+	"ping":   ping,
+	"echo":   echo,
+	"set":    set,
+	"get":    get,
+	"config": handleConfig,
 }
 
 func main() {
@@ -47,6 +49,7 @@ func main() {
 		os.Exit(1)
 	}
 	id := 0
+	config := buildConfig(os.Args)
 	for true {
 		conn, err := l.Accept()
 		if err != nil {
@@ -62,6 +65,7 @@ func main() {
 			writer:   conn,
 			commands: globalCommands,
 			KV:       map[string]RedisValue{},
+			Config:   config,
 		}
 
 		go func(conn *Connection) {
@@ -69,6 +73,18 @@ func main() {
 			handleConnection(conn)
 		}(&connection)
 	}
+}
+
+func buildConfig(args []string) map[string]string {
+	config := make(map[string]string)
+	for i, arg := range args {
+		if arg == "--dir" {
+			config["dir"] = args[i+1]
+		} else if arg == "--dbfilename" {
+			config["dbfilename"] = args[i+1]
+		}
+	}
+	return config
 }
 
 func resp(parts ...string) string {
@@ -146,6 +162,14 @@ func get(c *Connection) error {
 
 func echo(c *Connection) error {
 	c.response = fmt.Sprintf("+%s\r\n", strings.Join(c.args, " "))
+	return nil
+}
+
+func handleConfig(c *Connection) error {
+	key := c.args[1]
+	value := c.Config[key]
+
+	c.response = resp(key, value)
 	return nil
 }
 
