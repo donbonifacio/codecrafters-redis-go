@@ -12,6 +12,7 @@ var globalCommands = map[string]func(*Connection) error{
 	"echo":   echo,
 	"set":    set,
 	"get":    get,
+	"keys":   keys,
 	"config": handleConfig,
 }
 
@@ -36,7 +37,6 @@ func set(c *Connection) error {
 		}
 		expires_at := time.Now().UTC().Add(time.Duration(duration) * time.Millisecond)
 		value.ExpiresAt = &expires_at
-
 	}
 	c.KV[c.args[0]] = value
 	c.response = resp_ok()
@@ -47,22 +47,46 @@ func get(c *Connection) error {
 	if len(c.args) != 1 {
 		return fmt.Errorf("-ERR wrong number of arguments for 'get' command: %s\r\n", c.raw)
 	}
-	value := c.KV[c.args[0]]
+
+	value, err := raw_get(c, c.args[0])
+	if err != nil {
+		return err
+	}
+	c.response = value
+	return nil
+}
+
+func raw_get(c *Connection, key string) (string, error) {
+	value := c.KV[key]
 
 	now := time.Now().UTC()
 	if value.ExpiresAt != nil && now.After(*value.ExpiresAt) {
-		//fmt.Printf("----now: %v expires: %v\n", now, *value.ExpiresAt)
-		delete(c.KV, c.args[0])
-		c.response = resp_nil()
-		return nil
+		delete(c.KV, key)
+		return "", nil
 	}
 
-	c.response = fmt.Sprintf("$%v\r\n%v\r\n", len(value.Value), value.Value)
-	return nil
+	return resp(value.Value), nil
 }
 
 func echo(c *Connection) error {
 	c.response = fmt.Sprintf("+%s\r\n", strings.Join(c.args, " "))
+	return nil
+}
+
+func keys(c *Connection) error {
+	if len(c.args) != 1 {
+		return fmt.Errorf("-ERR wrong number of arguments for 'keys' command: %s\r\n", c.raw)
+	}
+
+	var results []string
+	for k := range c.KV {
+		val, _ := raw_get(c, k)
+		if len(val) > 0 {
+			results = append(results, k)
+		}
+	}
+
+	c.response = resp_array(results)
 	return nil
 }
 

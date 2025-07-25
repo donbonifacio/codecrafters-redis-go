@@ -12,10 +12,22 @@ func resp(parts ...string) string {
 		return resp_nil()
 	}
 
-	var sb strings.Builder
-	if len(parts) > 1 {
-		sb.WriteString(fmt.Sprintf("*%d\r\n", len(parts)))
+	if len(parts) == 1 {
+		return resp_value(parts[0])
 	}
+
+	return resp_array(parts)
+}
+
+func resp_value(part string) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("$%d\r\n%s\r\n", len(part), part))
+	return sb.String()
+}
+
+func resp_array(parts []string) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("*%d\r\n", len(parts)))
 	for _, part := range parts {
 		sb.WriteString(fmt.Sprintf("$%d\r\n%s\r\n", len(part), part))
 	}

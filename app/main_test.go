@@ -41,6 +41,21 @@ func TestSetGet(t *testing.T) {
 	)
 }
 
+func TestKeys(t *testing.T) {
+	connection := processCommand(t, nil,
+		resp("KEYS", "*"),
+		resp_nil(),
+	)
+	connection = processCommand(t, connection,
+		resp("SET", "key", "value"),
+		resp_ok(),
+	)
+	connection = processCommand(t, connection,
+		resp("KEYS", "*"),
+		resp_array([]string{"key"}),
+	)
+}
+
 func TestConfig(t *testing.T) {
 	connection := processCommand(t, nil,
 		resp("SET", "key", "value"),
