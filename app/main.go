@@ -16,6 +16,13 @@ func main() {
 		os.Exit(1)
 	}
 	id := 0
+	config := buildConfig(os.Args)
+	mainDB, _, err := loadDB(config)
+	if err != nil {
+		fmt.Println("Error loading database: ", err.Error())
+		os.Exit(1)
+	}
+
 	for true {
 		conn, err := l.Accept()
 		if err != nil {
@@ -30,8 +37,8 @@ func main() {
 			reader:   conn,
 			writer:   conn,
 			commands: globalCommands,
-			KV:       map[string]RedisValue{},
-			Config:   buildConfig(os.Args),
+			KV:       mainDB,
+			Config:   config,
 		}
 
 		go func(conn *Connection) {

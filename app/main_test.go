@@ -7,13 +7,22 @@ import (
 	"time"
 )
 
-func processCommand(t *testing.T, previous *Connection, cmd string, expectedResponse string) *Connection {
-	connection := &Connection{
-		reader:   bytes.NewBufferString(cmd),
+func createTestConnection(rawConfig map[string]string) *Connection {
+	if rawConfig == nil {
+		rawConfig = map[string]string{}
+	}
+	return &Connection{
+		reader:   bytes.NewBufferString(""),
 		writer:   bytes.NewBufferString(""),
 		commands: globalCommands,
 		KV:       map[string]RedisValue{},
+		Config:   rawConfig,
 	}
+}
+
+func processCommand(t *testing.T, previous *Connection, cmd string, expectedResponse string) *Connection {
+	connection := createTestConnection(nil)
+	connection.reader = bytes.NewBufferString(cmd)
 
 	if previous != nil {
 		connection.KV = previous.KV
