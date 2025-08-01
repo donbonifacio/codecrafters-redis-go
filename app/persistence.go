@@ -53,70 +53,130 @@ func readMetadataItem(r io.Reader) (name string, value string, err error) {
 		return "", "", fmt.Errorf("expected metadata marker 0xFA, got 0x%X", buf[0])
 	}
 
-	name, err = readEncodedString(r)
+	nameResult, err := readEncoded(r)
 	if err != nil {
 		return "", "", fmt.Errorf("error reading metadata name: %w", err)
 	}
 
-	value, err = readEncodedString(r)
+	valueResult, err := readEncoded(r)
 	if err != nil {
 		return "", "", fmt.Errorf("error reading metadata value: %w", err)
 	}
 
-	return name, value, nil
+	return nameResult.stringValue, valueResult.stringValue, nil
 }
 
-func readEncodedString(r io.Reader) (string, error) {
+type ReadBlock struct {
+	name             string
+	mask             uint8
+	extraBytesToRead func(b byte) int
+	decodeString     func(bytes []byte) string
+	decodeInt        func(bytes []byte) int
+}
+
+type ReadBlockResult struct {
+	stringValue      string
+	intValue         int
+	returnType       string
+	bytes            []byte
+	extraBytesToRead int
+}
+
+func (r *ReadBlockResult) toString() string {
+	return fmt.Sprintf(
+		"ReadBlockResult{stringValue: %q, intValue: %d, returnType: %q, bytes: %v, extraBytesToRead: %d}",
+		r.stringValue, r.intValue, r.returnType, r.bytes, r.extraBytesToRead,
+	)
+}
+
+func readEncoded(r io.Reader) (*ReadBlockResult, error) {
+	blocks := []ReadBlock{
+		ReadBlock{
+			name: "int8",
+			mask: 0xC0,
+			extraBytesToRead: func(_ byte) int {
+				return 1
+			},
+			decodeString: func(bytes []byte) string {
+				return fmt.Sprintf("%d", int(bytes[1]))
+			},
+		},
+		ReadBlock{
+			name: "int16",
+			mask: 0xC1,
+			extraBytesToRead: func(_ byte) int {
+				return 2
+			},
+			decodeString: func(bytes []byte) string {
+				return fmt.Sprintf("%d", int(int16(bytes[1])|(int16(bytes[2])<<8)))
+			},
+		},
+		ReadBlock{
+			name: "int24",
+			mask: 0xC2,
+			extraBytesToRead: func(_ byte) int {
+				return 4
+			},
+			decodeString: func(bytes []byte) string {
+				return fmt.Sprintf("%d", int(uint32(bytes[1])|(uint32(bytes[2])<<8)|(uint32(bytes[3])<<16)|(uint32(bytes[4])<<24)))
+			},
+		},
+		// catch all
+		ReadBlock{
+			name: "string",
+			extraBytesToRead: func(b byte) int {
+				return int(b)
+			},
+			decodeString: func(bytes []byte) string {
+				return string(bytes[1:])
+			},
+		},
+	}
 	buf := make([]byte, 1)
 	n, err := r.Read(buf)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if n != 1 {
-		return "", fmt.Errorf("expected 1 bytes for length, got %d", n)
+		return nil, fmt.Errorf("expected 1 bytes for length, got %d", n)
 	}
-	length := parseLength(buf[0])
-	strBuf := make([]byte, length)
+	var block *ReadBlock
+	for _, b := range blocks {
+		if buf[0]&b.mask == buf[0] {
+			block = &b
+			break
+		}
+	}
+	if block == nil {
+		// last one, catch all
+		block = &blocks[len(blocks)-1]
+	}
+	fmt.Printf("block: %v\n", block)
+	extraBytesToRead := block.extraBytesToRead(buf[0])
+	strBuf := make([]byte, extraBytesToRead)
 	n, err = r.Read(strBuf)
-	fmt.Printf("------%v %v\n", strBuf, string(strBuf))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	if n != length {
-		return "", fmt.Errorf("expected %d bytes for string, got %d", length, n)
+	if n != extraBytesToRead {
+		return nil, fmt.Errorf("expected %d bytes for string, got %d", extraBytesToRead, n)
 	}
-	return parseContent(buf[0], strBuf), nil
-}
-
-func parseLength(b byte) int {
-	if b == 0xC0 {
-		// 8 bit int
-		return 1
+	strBuf = append([]byte{buf[0]}, strBuf...)
+	if block.decodeString != nil {
+		return &ReadBlockResult{
+			bytes:            strBuf,
+			extraBytesToRead: extraBytesToRead,
+			stringValue:      block.decodeString(strBuf),
+			returnType:       "string",
+		}, nil
 	}
-	if b == 0xC1 {
-		// 16 bit int
-		return 2
+	if block.decodeInt != nil {
+		return &ReadBlockResult{
+			extraBytesToRead: extraBytesToRead,
+			intValue:         block.decodeInt(strBuf),
+			bytes:            strBuf,
+			returnType:       "int",
+		}, nil
 	}
-	if b == 0xC2 {
-		// 32 bit int
-		return 4
-	}
-	return int(b)
-
-}
-
-func parseContent(b byte, strBuf []byte) string {
-	if b == 0xC0 {
-		// 8 bit int
-		return fmt.Sprintf("%d", int(strBuf[0]))
-	}
-	if b == 0xC1 {
-		// 16 bit int
-		return fmt.Sprintf("%d", int(int16(strBuf[0])|(int16(strBuf[1])<<8)))
-	}
-	if b == 0xC2 {
-		// 32 bit int
-		return fmt.Sprintf("%d", int(uint32(strBuf[0])|(uint32(strBuf[1])<<8)|(uint32(strBuf[2])<<16)|(uint32(strBuf[3])<<24)))
-	}
-	return string(strBuf)
+	return nil, fmt.Errorf("unsupported block type")
 }

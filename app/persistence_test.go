@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 )
 
@@ -69,12 +70,13 @@ func TestReadMetadataEntry(t *testing.T) {
 
 func checkEncodedString(t *testing.T, encoded []byte, expected string) {
 	reader := bytes.NewReader(encoded)
-	result, err := readEncodedString(reader)
+	result, err := readEncoded(reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(result) != expected {
-		t.Errorf("expected header %v, got %v", expected, result)
+	fmt.Println(result.toString())
+	if result.stringValue != expected {
+		t.Errorf("expected header %v, got %v", expected, result.stringValue)
 	}
 }
 
